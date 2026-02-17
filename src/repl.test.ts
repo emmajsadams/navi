@@ -15,6 +15,21 @@ describe("parseInput", () => {
     expect(parseInput("/usage")).toEqual({ type: "usage" });
   });
 
+  it("parses /save", () => {
+    expect(parseInput("/save")).toEqual({ type: "save" });
+  });
+
+  it("parses /sessions", () => {
+    expect(parseInput("/sessions")).toEqual({ type: "sessions" });
+  });
+
+  it("parses /load with id", () => {
+    expect(parseInput("/load abc123")).toEqual({
+      type: "load",
+      id: "abc123",
+    });
+  });
+
   it("parses regular messages", () => {
     expect(parseInput("hello world")).toEqual({
       type: "message",

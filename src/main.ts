@@ -6,6 +6,8 @@ import { loadConfig } from "./config.ts";
 import { type ContextConfig, getContextLimit } from "./context.ts";
 import { getProvider } from "./providers/registry.ts";
 import { createConversation, parseInput, sendMessage } from "./repl.ts";
+import type { ConversationState } from "./repl.ts";
+import { generateSessionId, listSessions, loadSession, saveSession } from "./sessions.ts";
 import { builtinTools, createToolRegistry } from "./tools.ts";
 import { color, styled } from "./tui/ansi.ts";
 import { formatMarkdown, formatStatusBar } from "./tui/format.ts";
@@ -18,11 +20,13 @@ function parseArgs(args: string[]): {
   contextStrategy: "truncate" | "error";
   noTui: boolean;
   provider: string | undefined;
+  sessionId: string | undefined;
 } {
   let systemPrompt: string | undefined;
   let noTools = false;
   let noTui = false;
   let provider: string | undefined;
+  let sessionId: string | undefined;
   let contextStrategy: "truncate" | "error" = "truncate";
   const rest: string[] = [];
 
@@ -43,6 +47,8 @@ function parseArgs(args: string[]): {
       noTui = true;
     } else if (arg === "--provider" && i + 1 < args.length) {
       provider = args[++i];
+    } else if (arg === "--session" && i + 1 < args.length) {
+      sessionId = args[++i];
     } else if (arg === "--context-strategy" && i + 1 < args.length) {
       const val = args[++i];
       if (val === "truncate" || val === "error") {
@@ -59,6 +65,7 @@ function parseArgs(args: string[]): {
     noTools,
     noTui,
     provider,
+    sessionId,
     contextStrategy,
   };
 }
@@ -130,10 +137,10 @@ async function runRepl(
   contextStrategy: "truncate" | "error",
   useTui: boolean,
   providerName: string | undefined,
+  resumeSessionId: string | undefined,
 ) {
   const config = loadConfig(providerName);
   const provider = getProvider(config.provider);
-  const state = createConversation(systemPrompt);
   const toolRegistry = useTools ? createToolRegistry(builtinTools) : undefined;
 
   const contextConfig: ContextConfig = {
@@ -142,10 +149,32 @@ async function runRepl(
     reservedTokens: config.maxTokens,
   };
 
+  // Session management
+  let sessionId: string;
+  let state: ConversationState;
+
+  if (resumeSessionId) {
+    const session = loadSession(resumeSessionId);
+    if (session) {
+      sessionId = resumeSessionId;
+      state = session.state;
+      console.log(styled(`Resumed session ${sessionId} (${state.turns} turns)`, color.dim));
+    } else {
+      console.error(
+        styled(`Session "${resumeSessionId}" not found. Starting new session.`, color.yellow),
+      );
+      sessionId = generateSessionId();
+      state = createConversation(systemPrompt);
+    }
+  } else {
+    sessionId = generateSessionId();
+    state = createConversation(systemPrompt);
+  }
+
   const toolNames = toolRegistry ? toolRegistry.tools.map((t) => t.name).join(", ") : "none";
 
   // Header
-  console.log(styled("navi", color.bold, color.cyan) + styled(" v0.6.0", color.dim));
+  console.log(styled("navi", color.bold, color.cyan) + styled(" v0.7.0", color.dim));
   console.log(styled(`provider: ${provider.name} · model: ${config.model}`, color.dim));
   console.log(styled(`tools: ${toolNames}`, color.dim));
   console.log(
@@ -154,9 +183,14 @@ async function runRepl(
       color.dim,
     ),
   );
-  console.log(styled("commands: /quit /clear /usage\n", color.dim));
+  console.log(styled(`session: ${sessionId}`, color.dim));
+  console.log(styled("commands: /quit /clear /usage /save /load <id> /sessions\n", color.dim));
 
   const promptStr = `${styled("›", color.cyan)} `;
+
+  function autoSave() {
+    saveSession(sessionId, state, config.model, config.provider);
+  }
 
   process.stdout.write(promptStr);
   for await (const line of console) {
@@ -164,8 +198,14 @@ async function runRepl(
 
     switch (command.type) {
       case "quit": {
+        autoSave();
         const total = state.totalInputTokens + state.totalOutputTokens;
-        console.log(styled(`\n${state.turns} turns · ${total.toLocaleString()} tokens`, color.dim));
+        console.log(
+          styled(
+            `\n${state.turns} turns · ${total.toLocaleString()} tokens · saved ${sessionId}`,
+            color.dim,
+          ),
+        );
         process.exit(0);
         break;
       }
@@ -180,10 +220,46 @@ async function runRepl(
         const total = state.totalInputTokens + state.totalOutputTokens;
         console.log(
           styled(
-            `${state.turns} turns · ${state.totalInputTokens.toLocaleString()}↑ ${state.totalOutputTokens.toLocaleString()}↓ · ${total.toLocaleString()} total\n`,
+            `${state.turns} turns · ${state.totalInputTokens.toLocaleString()}↑ ${state.totalOutputTokens.toLocaleString()}↓ · ${total.toLocaleString()} total\nsession: ${sessionId}\n`,
             color.dim,
           ),
         );
+        break;
+      }
+      case "save":
+        autoSave();
+        console.log(styled(`saved session ${sessionId}\n`, color.green));
+        break;
+      case "load": {
+        const session = loadSession(command.id);
+        if (session) {
+          sessionId = command.id;
+          state.messages = session.state.messages;
+          state.systemPrompt = session.state.systemPrompt;
+          state.turns = session.state.turns;
+          state.totalInputTokens = session.state.totalInputTokens;
+          state.totalOutputTokens = session.state.totalOutputTokens;
+          console.log(styled(`loaded session ${sessionId} (${state.turns} turns)\n`, color.green));
+        } else {
+          console.log(styled(`session "${command.id}" not found\n`, color.red));
+        }
+        break;
+      }
+      case "sessions": {
+        const sessions = listSessions();
+        if (sessions.length === 0) {
+          console.log(styled("no saved sessions\n", color.dim));
+        } else {
+          console.log(styled("Saved sessions:", color.bold));
+          for (const s of sessions.slice(0, 20)) {
+            const current = s.id === sessionId ? " ←" : "";
+            const date = new Date(s.updatedAt).toLocaleString();
+            console.log(
+              `  ${styled(s.id, color.cyan)} ${styled(`${s.turns}t`, color.dim)} ${styled(`${s.totalTokens.toLocaleString()}tok`, color.dim)} ${styled(s.provider, color.dim)}/${styled(s.model, color.dim)} ${styled(date, color.gray)}${styled(current, color.green)}`,
+            );
+          }
+          console.log("");
+        }
         break;
       }
       case "message": {
@@ -245,6 +321,9 @@ async function runRepl(
             },
           });
           console.log("\n");
+
+          // Auto-save after each turn
+          autoSave();
         } catch (err) {
           spinner?.stop("");
           console.error(
@@ -260,7 +339,7 @@ async function runRepl(
 }
 
 async function main() {
-  const { prompt, systemPrompt, noTools, noTui, provider, contextStrategy } = parseArgs(
+  const { prompt, systemPrompt, noTools, noTui, provider, sessionId, contextStrategy } = parseArgs(
     process.argv.slice(2),
   );
 
@@ -279,7 +358,7 @@ async function main() {
     }
   }
 
-  await runRepl(systemPrompt, !noTools, contextStrategy, useTui, provider);
+  await runRepl(systemPrompt, !noTools, contextStrategy, useTui, provider, sessionId);
 }
 
 main();

@@ -7,6 +7,9 @@ export type Command =
   | { type: "quit" }
   | { type: "clear" }
   | { type: "usage" }
+  | { type: "save" }
+  | { type: "load"; id: string }
+  | { type: "sessions" }
   | { type: "message"; text: string };
 
 export function parseInput(input: string): Command {
@@ -14,6 +17,11 @@ export function parseInput(input: string): Command {
   if (trimmed === "/quit" || trimmed === "/exit") return { type: "quit" };
   if (trimmed === "/clear") return { type: "clear" };
   if (trimmed === "/usage") return { type: "usage" };
+  if (trimmed === "/save") return { type: "save" };
+  if (trimmed === "/sessions") return { type: "sessions" };
+  if (trimmed.startsWith("/load ")) {
+    return { type: "load", id: trimmed.slice(6).trim() };
+  }
   return { type: "message", text: trimmed };
 }
 
