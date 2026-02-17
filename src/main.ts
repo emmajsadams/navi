@@ -7,15 +7,20 @@ import { loadConfig } from "./config.ts";
 import { type ContextConfig, getContextLimit } from "./context.ts";
 import { createConversation, parseInput, sendMessage } from "./repl.ts";
 import { builtinTools, createToolRegistry } from "./tools.ts";
+import { color, styled } from "./tui/ansi.ts";
+import { formatMarkdown, formatStatusBar } from "./tui/format.ts";
+import { createSpinner } from "./tui/spinner.ts";
 
 function parseArgs(args: string[]): {
   prompt: string | undefined;
   systemPrompt: string | undefined;
   noTools: boolean;
   contextStrategy: "truncate" | "error";
+  noTui: boolean;
 } {
   let systemPrompt: string | undefined;
   let noTools = false;
+  let noTui = false;
   let contextStrategy: "truncate" | "error" = "truncate";
   const rest: string[] = [];
 
@@ -32,6 +37,8 @@ function parseArgs(args: string[]): {
       }
     } else if (arg === "--no-tools") {
       noTools = true;
+    } else if (arg === "--no-tui") {
+      noTui = true;
     } else if (arg === "--context-strategy" && i + 1 < args.length) {
       const val = args[++i];
       if (val === "truncate" || val === "error") {
@@ -46,6 +53,7 @@ function parseArgs(args: string[]): {
     prompt: rest.length > 0 ? rest.join(" ") : undefined,
     systemPrompt,
     noTools,
+    noTui,
     contextStrategy,
   };
 }
@@ -71,22 +79,35 @@ async function confirm(question: string): Promise<boolean> {
   });
 }
 
-async function runSingleShot(prompt: string, systemPrompt: string | undefined) {
+async function runSingleShot(prompt: string, systemPrompt: string | undefined, useTui: boolean) {
   const config = loadConfig();
   const messages = [{ role: "user" as const, content: prompt }];
+  const chunks: string[] = [];
 
   for await (const event of streamMessage(config, messages, systemPrompt)) {
     switch (event.type) {
       case "text":
-        process.stdout.write(event.text);
+        chunks.push(event.text);
+        if (!useTui) {
+          process.stdout.write(event.text);
+        }
         break;
       case "usage":
-        console.log(
-          `\n\n---\ntokens: ${event.usage.inputTokens} in / ${event.usage.outputTokens} out`,
-        );
+        if (useTui) {
+          const formatted = formatMarkdown(chunks.join(""));
+          process.stdout.write(`${formatted}\n`);
+          const cols = process.stdout.columns ?? 80;
+          console.log(
+            formatStatusBar("", `${event.usage.inputTokens}↑ ${event.usage.outputTokens}↓`, cols),
+          );
+        } else {
+          console.log(
+            `\n\n---\ntokens: ${event.usage.inputTokens} in / ${event.usage.outputTokens} out`,
+          );
+        }
         break;
       case "error":
-        console.error(`\nerror: ${event.error}`);
+        console.error(`\n${styled("error:", color.red)} ${event.error}`);
         process.exit(1);
     }
   }
@@ -96,6 +117,7 @@ async function runRepl(
   systemPrompt: string | undefined,
   useTools: boolean,
   contextStrategy: "truncate" | "error",
+  useTui: boolean,
 ) {
   const config = loadConfig();
   const state = createConversation(systemPrompt);
@@ -104,43 +126,58 @@ async function runRepl(
   const contextConfig: ContextConfig = {
     maxContextTokens: getContextLimit(config.model),
     strategy: contextStrategy,
-    reservedTokens: config.maxTokens, // reserve space for the response
+    reservedTokens: config.maxTokens,
   };
 
   const toolNames = toolRegistry ? toolRegistry.tools.map((t) => t.name).join(", ") : "none";
 
-  console.log("navi v0.4.0");
-  console.log(`Tools: ${toolNames}`);
-  console.log(`Context: ${contextConfig.maxContextTokens} tokens (${contextStrategy})`);
-  console.log("Type /quit to exit, /clear to reset, /usage for stats.\n");
+  // Header
+  console.log(styled("navi", color.bold, color.cyan) + styled(" v0.5.0", color.dim));
+  console.log(styled(`model: ${config.model}`, color.dim));
+  console.log(styled(`tools: ${toolNames}`, color.dim));
+  console.log(
+    styled(
+      `context: ${contextConfig.maxContextTokens.toLocaleString()} tokens (${contextStrategy})`,
+      color.dim,
+    ),
+  );
+  console.log(styled("commands: /quit /clear /usage\n", color.dim));
 
-  const promptStr = "\x1b[36mnavi>\x1b[0m ";
+  const promptStr = `${styled("›", color.cyan)} `;
 
   process.stdout.write(promptStr);
   for await (const line of console) {
     const command = parseInput(line);
 
     switch (command.type) {
-      case "quit":
-        console.log(
-          `\nSession: ${state.turns} turns, ${state.totalInputTokens + state.totalOutputTokens} tokens total`,
-        );
+      case "quit": {
+        const total = state.totalInputTokens + state.totalOutputTokens;
+        console.log(styled(`\n${state.turns} turns · ${total.toLocaleString()} tokens`, color.dim));
         process.exit(0);
         break;
+      }
       case "clear":
         state.messages.length = 0;
         state.turns = 0;
         state.totalInputTokens = 0;
         state.totalOutputTokens = 0;
-        console.log("Conversation cleared.\n");
+        console.log(styled("conversation cleared\n", color.dim));
         break;
-      case "usage":
+      case "usage": {
+        const total = state.totalInputTokens + state.totalOutputTokens;
         console.log(
-          `Turns: ${state.turns} | Tokens: ${state.totalInputTokens} in / ${state.totalOutputTokens} out | Total: ${state.totalInputTokens + state.totalOutputTokens}\n`,
+          styled(
+            `${state.turns} turns · ${state.totalInputTokens.toLocaleString()}↑ ${state.totalOutputTokens.toLocaleString()}↓ · ${total.toLocaleString()} total\n`,
+            color.dim,
+          ),
         );
         break;
-      case "message":
+      }
+      case "message": {
         if (!command.text) break;
+        const spinner = useTui ? createSpinner() : undefined;
+        let streaming = false;
+
         try {
           await sendMessage({
             config,
@@ -148,30 +185,61 @@ async function runRepl(
             userText: command.text,
             toolRegistry,
             contextConfig,
-            onText: (text) => process.stdout.write(text),
+            onText: (text) => {
+              if (spinner && !streaming) {
+                spinner.stop("");
+                streaming = true;
+              }
+              process.stdout.write(text);
+            },
             onToolCall: (name, input) => {
-              console.log(`\n\x1b[33m⚡ ${name}\x1b[0m ${JSON.stringify(input)}`);
+              const inputStr = JSON.stringify(input);
+              const preview = inputStr.length > 60 ? `${inputStr.slice(0, 60)}…` : inputStr;
+              if (useTui) {
+                console.log(
+                  `\n${styled("⚡", color.yellow)} ${styled(name, color.bold)} ${styled(preview, color.dim)}`,
+                );
+                spinner?.start(`running ${name}...`);
+                streaming = false;
+              } else {
+                console.log(`\n\x1b[33m⚡ ${name}\x1b[0m ${inputStr}`);
+              }
             },
             onToolResult: (name, result, isError) => {
-              const color = isError ? "\x1b[31m" : "\x1b[32m";
-              const icon = isError ? "✗" : "✓";
-              const preview = result.length > 200 ? `${result.slice(0, 200)}...` : result;
-              console.log(`${color}${icon} ${name}\x1b[0m: ${preview}\n`);
+              if (useTui) {
+                const icon = isError ? styled("✗", color.red) : styled("✓", color.green);
+                const preview = result.length > 120 ? `${result.slice(0, 120)}…` : result;
+                spinner?.stop(`${icon} ${styled(name, color.bold)} ${styled(preview, color.dim)}`);
+              } else {
+                const clr = isError ? "\x1b[31m" : "\x1b[32m";
+                const icon = isError ? "✗" : "✓";
+                const preview = result.length > 200 ? `${result.slice(0, 200)}...` : result;
+                console.log(`${clr}${icon} ${name}\x1b[0m: ${preview}\n`);
+              }
             },
             onContextTruncation: (dropped) => {
               console.log(
-                `\x1b[33m⚠ Context truncated: dropped ${dropped} oldest message(s)\x1b[0m\n`,
+                styled(`⚠ dropped ${dropped} oldest message(s) (context limit)`, color.yellow),
               );
             },
             confirmTool: async (name, input) => {
-              return confirm(`\x1b[33mAllow ${name}?\x1b[0m ${JSON.stringify(input)} [y/N] `);
+              spinner?.stop("");
+              const result = await confirm(
+                `${styled("allow", color.yellow)} ${styled(name, color.bold)}? ${styled(JSON.stringify(input), color.dim)} ${styled("[y/N]", color.dim)} `,
+              );
+              return result;
             },
           });
+
           console.log("\n");
         } catch (err) {
-          console.error(`\nerror: ${err instanceof Error ? err.message : String(err)}\n`);
+          spinner?.stop("");
+          console.error(
+            `${styled("error:", color.red)} ${err instanceof Error ? err.message : String(err)}\n`,
+          );
         }
         break;
+      }
     }
 
     process.stdout.write(promptStr);
@@ -179,22 +247,26 @@ async function runRepl(
 }
 
 async function main() {
-  const { prompt, systemPrompt, noTools, contextStrategy } = parseArgs(process.argv.slice(2));
+  const { prompt, systemPrompt, noTools, noTui, contextStrategy } = parseArgs(
+    process.argv.slice(2),
+  );
+
+  const useTui = !noTui && process.stdout.isTTY === true;
 
   if (prompt) {
-    await runSingleShot(prompt, systemPrompt);
+    await runSingleShot(prompt, systemPrompt, useTui);
     return;
   }
 
   if (!process.stdin.isTTY) {
     const stdinText = await readStdin();
     if (stdinText) {
-      await runSingleShot(stdinText, systemPrompt);
+      await runSingleShot(stdinText, systemPrompt, useTui);
       return;
     }
   }
 
-  await runRepl(systemPrompt, !noTools, contextStrategy);
+  await runRepl(systemPrompt, !noTools, contextStrategy, useTui);
 }
 
 main();

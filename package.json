@@ -2,7 +2,15 @@
   "name": "navi",
   "version": "0.1.0",
   "module": "src/main.ts",
-  "type": "module",
+  "devDependencies": {
+    "@types/bun": "latest",
+    "husky": "^9.1.7",
+    "oxfmt": "^0.33.0",
+    "oxlint": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
   "private": true,
   "scripts": {
     "start": "bun run src/main.ts",
@@ -14,13 +22,5 @@
     "check": "bun run lint && bun run fmt:check && bun run test",
     "prepare": "husky"
   },
-  "devDependencies": {
-    "@types/bun": "latest",
-    "husky": "^9.1.7",
-    "oxfmt": "^0.33.0",
-    "oxlint": "latest"
-  },
-  "peerDependencies": {
-    "typescript": "^5"
-  }
+  "type": "module"
 }
