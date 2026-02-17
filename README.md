@@ -163,6 +163,20 @@ Each milestone builds on the last. Designed for learning — every phase teaches
 - Prompt library / template system
 - Evaluation harness (run prompts, score outputs)
 
+## References
+
+Essential reading for understanding agent harness design:
+
+- **[The Harness Problem](https://blog.can.ac/2026/02/12/the-harness-problem/)** — Can Bölük's deep dive on how edit tool design matters more than model choice. Improved 15 LLMs by only changing the harness. Introduces hashline edits.
+- **[Anthropic Messages API](https://docs.anthropic.com/en/api/messages)** — The raw API navi is built against. Streaming, tool use, message format.
+- **[Anthropic Tool Use Guide](https://docs.anthropic.com/en/docs/build-with-claude/tool-use/overview)** — How tool_use and tool_result blocks work in the message protocol.
+- **[Pi Coding Agent](https://github.com/badlogic/pi-mono)** — Open-source coding agent by Mario Zechner. Clean reference implementation.
+- **[oh-my-pi](https://github.com/can1357/oh-my-pi)** — Can Bölük's fork of Pi with 1,300+ commits of harness experimentation.
+- **[Aider Benchmarks](https://aider.chat/docs/benchmarks.html)** — Shows how edit format choice swings model performance by 2x+.
+- **[Diff-XYZ (JetBrains)](https://arxiv.org/abs/2510.12487)** — Systematic study confirming no single edit format dominates across models.
+- **[EDIT-Bench](https://arxiv.org/abs/2511.04486)** — Benchmark for realistic code editing tasks across models.
+- **[Cursor Instant Apply](https://cursor.com/blog/instant-apply)** — How Cursor trained a separate 70B model just to apply edits correctly.
+
 ## License
 
 MIT
