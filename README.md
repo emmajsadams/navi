@@ -112,47 +112,47 @@ Each milestone builds on the last. Designed for learning — every phase teaches
 - [x] Safety: confirmation prompt before exec/write
 - [x] Tests: tool registry, execution, mock tool calls
 
-### v0.4 — Context window management
+### v0.4 — Context window management ✅
 **Learn:** Token budgets, truncation strategies, summarization
 
-- [ ] Track total token usage against model's context window
-- [ ] Truncation strategy: drop oldest messages when approaching limit
-- [ ] Summarization strategy: condense old messages via LLM call
-- [ ] Configurable strategy (truncate vs summarize vs fail)
-- [ ] Reserve budget for system prompt + tools (they always fit)
-- [ ] Tests: budget tracking, truncation logic, summary generation
+- [x] Track total token usage against model's context window
+- [x] Truncation strategy: drop oldest messages when approaching limit
+- [x] Summarization strategy: condense old messages via LLM call
+- [x] Configurable strategy (truncate vs summarize vs fail)
+- [x] Reserve budget for system prompt + tools (they always fit)
+- [x] Tests: budget tracking, truncation logic, summary generation
 
-### v0.5 — TUI
+### v0.5 — TUI ✅
 **Learn:** Terminal rendering, layout, real-time updates
 
-- [ ] Structured terminal UI (not just raw stdout)
-- [ ] Panels: conversation view, input area, status bar
-- [ ] Streaming tokens render in-place (no scroll spam)
-- [ ] Tool calls display inline with spinners/status
-- [ ] Status bar: model, token usage, cost estimate, turn count
-- [ ] Markdown rendering in terminal (bold, code blocks, lists)
-- [ ] Color theme
-- [ ] Tests: rendering logic (unit test the formatters, not the terminal)
+- [x] Structured terminal UI (not just raw stdout)
+- [x] Panels: conversation view, input area, status bar
+- [x] Streaming tokens render in-place (no scroll spam)
+- [x] Tool calls display inline with spinners/status
+- [x] Status bar: model, token usage, cost estimate, turn count
+- [x] Markdown rendering in terminal (bold, code blocks, lists)
+- [x] Color theme
+- [x] Tests: rendering logic (unit test the formatters, not the terminal)
 
-### v0.6 — Multi-provider
+### v0.6 — Multi-provider ✅
 **Learn:** API abstraction, adapter pattern, different message formats
 
-- [ ] Provider interface: `send(messages, tools, config) → AsyncIterable<StreamEvent>`
-- [ ] Anthropic provider (already built, refactor to interface)
-- [ ] OpenAI provider (chat completions API, different tool format)
-- [ ] Provider selection via config/flag (`--provider openai`)
-- [ ] Normalize streaming events across providers
-- [ ] Tests: provider adapters with recorded API responses
+- [x] Provider interface: `send(messages, tools, config) → AsyncIterable<StreamEvent>`
+- [x] Anthropic provider (already built, refactor to interface)
+- [x] OpenAI provider (chat completions API, different tool format)
+- [x] Provider selection via config/flag (`--provider openai`)
+- [x] Normalize streaming events across providers
+- [x] Tests: provider adapters with recorded API responses
 
-### v0.7 — Session persistence
+### v0.7 — Session persistence ✅
 **Learn:** Serialization, storage, resume logic
 
-- [ ] Save conversation state to disk (JSON or SQLite)
-- [ ] Resume a previous session by ID
-- [ ] List past sessions with metadata (model, turns, created, last active)
-- [ ] Auto-save after each turn
-- [ ] `/save`, `/load`, `/sessions` commands
-- [ ] Tests: serialization roundtrip, session listing
+- [x] Save conversation state to disk (JSON or SQLite)
+- [x] Resume a previous session by ID
+- [x] List past sessions with metadata (model, turns, created, last active)
+- [x] Auto-save after each turn
+- [x] `/save`, `/load`, `/sessions` commands
+- [x] Tests: serialization roundtrip, session listing
 
 ### Future ideas (unplanned)
 - MCP (Model Context Protocol) tool server support
