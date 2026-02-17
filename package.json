@@ -1,10 +1,22 @@
 {
   "name": "navi",
-  "module": "index.ts",
+  "version": "0.1.0",
+  "module": "src/main.ts",
   "type": "module",
   "private": true,
+  "scripts": {
+    "start": "bun run src/main.ts",
+    "dev": "bun --watch run src/main.ts",
+    "test": "bun test",
+    "lint": "oxlint src/",
+    "fmt": "oxfmt --write src/",
+    "fmt:check": "oxfmt --check src/",
+    "check": "bun run lint && bun run fmt:check && bun run test"
+  },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "oxfmt": "^0.33.0",
+    "oxlint": "latest"
   },
   "peerDependencies": {
     "typescript": "^5"
