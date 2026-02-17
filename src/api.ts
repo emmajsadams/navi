@@ -26,7 +26,18 @@ type ApiStreamEvent = {
 export async function* streamMessage(
   config: Config,
   messages: Message[],
+  systemPrompt?: string,
 ): AsyncGenerator<StreamEvent> {
+  const body: Record<string, unknown> = {
+    model: config.model,
+    max_tokens: config.maxTokens,
+    messages,
+    stream: true,
+  };
+  if (systemPrompt) {
+    body["system"] = systemPrompt;
+  }
+
   const response = await fetch(`${config.baseUrl}/v1/messages`, {
     method: "POST",
     headers: {
@@ -34,19 +45,14 @@ export async function* streamMessage(
       "x-api-key": config.apiKey,
       "anthropic-version": "2023-06-01",
     },
-    body: JSON.stringify({
-      model: config.model,
-      max_tokens: config.maxTokens,
-      messages,
-      stream: true,
-    }),
+    body: JSON.stringify(body),
   });
 
   if (!response.ok) {
-    const body = await response.text();
+    const text = await response.text();
     yield {
       type: "error",
-      error: `API error ${response.status}: ${body}`,
+      error: `API error ${response.status}: ${text}`,
     };
     return;
   }
