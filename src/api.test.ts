@@ -104,4 +104,118 @@ describe("streamMessage", () => {
     expect(body["messages"]).toEqual(messages);
     expect(body["stream"]).toBe(true);
   });
+
+  it("streams tool_use blocks", async () => {
+    globalThis.fetch = (() =>
+      Promise.resolve(
+        new Response(
+          sseStream([
+            JSON.stringify({
+              type: "message_start",
+              message: { usage: { input_tokens: 10 } },
+            }),
+            JSON.stringify({
+              type: "content_block_start",
+              index: 0,
+              content_block: { type: "tool_use", id: "toolu_123", name: "read_file" },
+            }),
+            JSON.stringify({
+              type: "content_block_delta",
+              index: 0,
+              delta: { type: "input_json_delta", partial_json: '{"path":' },
+            }),
+            JSON.stringify({
+              type: "content_block_delta",
+              index: 0,
+              delta: { type: "input_json_delta", partial_json: '"/tmp/x"}' },
+            }),
+            JSON.stringify({
+              type: "content_block_stop",
+              index: 0,
+            }),
+            JSON.stringify({
+              type: "message_delta",
+              delta: { stop_reason: "tool_use" },
+              usage: { output_tokens: 8 },
+            }),
+          ]),
+          { status: 200 },
+        ),
+      )) as unknown as typeof fetch;
+
+    const events: StreamEvent[] = [];
+    for await (const event of streamMessage(testConfig, [{ role: "user", content: "hi" }])) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      { type: "tool_use", id: "toolu_123", name: "read_file", input: { path: "/tmp/x" } },
+      { type: "stop", stopReason: "tool_use" },
+      { type: "usage", usage: { inputTokens: 10, outputTokens: 8 } },
+    ]);
+  });
+
+  it("passes tools in request body", async () => {
+    let capturedBody: string | undefined;
+
+    globalThis.fetch = ((_url: unknown, init: unknown) => {
+      const opts = init as RequestInit;
+      capturedBody = typeof opts.body === "string" ? opts.body : undefined;
+      return Promise.resolve(new Response(sseStream([]), { status: 200 }));
+    }) as typeof fetch;
+
+    const tools = [
+      {
+        name: "test_tool",
+        description: "A test",
+        input_schema: { type: "object" as const, properties: {}, required: [] },
+      },
+    ];
+    for await (const _event of streamMessage(
+      testConfig,
+      [{ role: "user", content: "hi" }],
+      undefined,
+      tools,
+    )) {
+      // exhaust
+    }
+
+    const body = JSON.parse(capturedBody ?? "{}") as Record<string, unknown>;
+    expect(body["tools"]).toEqual(tools);
+  });
+
+  it("emits stop event from message_delta", async () => {
+    globalThis.fetch = (() =>
+      Promise.resolve(
+        new Response(
+          sseStream([
+            JSON.stringify({
+              type: "message_start",
+              message: { usage: { input_tokens: 5 } },
+            }),
+            JSON.stringify({
+              type: "content_block_delta",
+              delta: { type: "text_delta", text: "Hi" },
+            }),
+            JSON.stringify({
+              type: "message_delta",
+              delta: { stop_reason: "end_turn" },
+              usage: { output_tokens: 2 },
+            }),
+          ]),
+          { status: 200 },
+        ),
+      )) as unknown as typeof fetch;
+
+    const events: StreamEvent[] = [];
+    for await (const event of streamMessage(testConfig, [{ role: "user", content: "hi" }])) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      { type: "text", text: "Hi" },
+      { type: "stop", stopReason: "end_turn" },
+      { type: "usage", usage: { inputTokens: 5, outputTokens: 2 } },
+    ]);
+  });
 });

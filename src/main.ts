@@ -1,15 +1,19 @@
 #!/usr/bin/env bun
 
 import { readFileSync } from "node:fs";
+import { createInterface } from "node:readline";
 import { streamMessage } from "./api.ts";
 import { loadConfig } from "./config.ts";
 import { createConversation, parseInput, sendMessage } from "./repl.ts";
+import { builtinTools, createToolRegistry } from "./tools.ts";
 
 function parseArgs(args: string[]): {
   prompt: string | undefined;
   systemPrompt: string | undefined;
+  noTools: boolean;
 } {
   let systemPrompt: string | undefined;
+  let noTools = false;
   const rest: string[] = [];
 
   for (let i = 0; i < args.length; i++) {
@@ -23,6 +27,8 @@ function parseArgs(args: string[]): {
           systemPrompt = val;
         }
       }
+    } else if (arg === "--no-tools") {
+      noTools = true;
     } else if (arg) {
       rest.push(arg);
     }
@@ -31,6 +37,7 @@ function parseArgs(args: string[]): {
   return {
     prompt: rest.length > 0 ? rest.join(" ") : undefined,
     systemPrompt,
+    noTools,
   };
 }
 
@@ -40,6 +47,19 @@ async function readStdin(): Promise<string> {
     chunks.push(chunk);
   }
   return new TextDecoder().decode(Buffer.concat(chunks)).trim();
+}
+
+async function confirm(question: string): Promise<boolean> {
+  const rl = createInterface({
+    input: process.stdin,
+    output: process.stderr,
+  });
+  return new Promise((resolve) => {
+    rl.question(question, (answer) => {
+      rl.close();
+      resolve(answer.toLowerCase() === "y" || answer.toLowerCase() === "yes");
+    });
+  });
 }
 
 async function runSingleShot(prompt: string, systemPrompt: string | undefined) {
@@ -63,16 +83,20 @@ async function runSingleShot(prompt: string, systemPrompt: string | undefined) {
   }
 }
 
-async function runRepl(systemPrompt: string | undefined) {
+async function runRepl(systemPrompt: string | undefined, useTools: boolean) {
   const config = loadConfig();
   const state = createConversation(systemPrompt);
+  const toolRegistry = useTools ? createToolRegistry(builtinTools) : undefined;
 
-  console.log("navi v0.2.0");
+  const toolNames = toolRegistry ? toolRegistry.tools.map((t) => t.name).join(", ") : "none";
+
+  console.log("navi v0.3.0");
+  console.log(`Tools: ${toolNames}`);
   console.log("Type /quit to exit, /clear to reset, /usage for stats.\n");
 
-  const prompt = "\x1b[36mnavi>\x1b[0m ";
+  const promptStr = "\x1b[36mnavi>\x1b[0m ";
 
-  process.stdout.write(prompt);
+  process.stdout.write(promptStr);
   for await (const line of console) {
     const command = parseInput(line);
 
@@ -98,8 +122,24 @@ async function runRepl(systemPrompt: string | undefined) {
       case "message":
         if (!command.text) break;
         try {
-          await sendMessage(config, state, command.text, (text) => {
-            process.stdout.write(text);
+          await sendMessage({
+            config,
+            state,
+            userText: command.text,
+            toolRegistry,
+            onText: (text) => process.stdout.write(text),
+            onToolCall: (name, input) => {
+              console.log(`\n\x1b[33m⚡ ${name}\x1b[0m ${JSON.stringify(input)}`);
+            },
+            onToolResult: (name, result, isError) => {
+              const color = isError ? "\x1b[31m" : "\x1b[32m";
+              const icon = isError ? "✗" : "✓";
+              const preview = result.length > 200 ? `${result.slice(0, 200)}...` : result;
+              console.log(`${color}${icon} ${name}\x1b[0m: ${preview}\n`);
+            },
+            confirmTool: async (name, input) => {
+              return confirm(`\x1b[33mAllow ${name}?\x1b[0m ${JSON.stringify(input)} [y/N] `);
+            },
           });
           console.log("\n");
         } catch (err) {
@@ -108,14 +148,13 @@ async function runRepl(systemPrompt: string | undefined) {
         break;
     }
 
-    process.stdout.write(prompt);
+    process.stdout.write(promptStr);
   }
 }
 
 async function main() {
-  const { prompt, systemPrompt } = parseArgs(process.argv.slice(2));
+  const { prompt, systemPrompt, noTools } = parseArgs(process.argv.slice(2));
 
-  // If prompt provided or stdin is piped, single-shot mode
   if (prompt) {
     await runSingleShot(prompt, systemPrompt);
     return;
@@ -129,8 +168,7 @@ async function main() {
     }
   }
 
-  // Otherwise, interactive REPL
-  await runRepl(systemPrompt);
+  await runRepl(systemPrompt, !noTools);
 }
 
 main();
