@@ -16,11 +16,16 @@
     "start": "bun run src/main.ts",
     "dev": "bun --watch run src/main.ts",
     "test": "bun test",
-    "lint": "oxlint src/",
+    "lint": "oxlint --fix src/",
+    "lint:check": "oxlint src/",
     "fmt": "oxfmt --write src/",
     "fmt:check": "oxfmt --check src/",
-    "check": "bun run lint && bun run fmt:check && bun run test",
+    "fix": "bun run fmt && bun run lint",
+    "check": "bun run lint:check && bun run fmt:check && bun run test",
     "prepare": "husky"
   },
-  "type": "module"
+  "type": "module",
+  "dependencies": {
+    "zod": "^4.3.6"
+  }
 }

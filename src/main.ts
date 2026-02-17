@@ -157,7 +157,7 @@ async function runRepl(
     const session = loadSession(resumeSessionId);
     if (session) {
       sessionId = resumeSessionId;
-      state = session.state;
+      state = session.state as ConversationState;
       console.log(styled(`Resumed session ${sessionId} (${state.turns} turns)`, color.dim));
     } else {
       console.error(
@@ -234,7 +234,7 @@ async function runRepl(
         const session = loadSession(command.id);
         if (session) {
           sessionId = command.id;
-          state.messages = session.state.messages;
+          state.messages = session.state.messages as ConversationState["messages"];
           state.systemPrompt = session.state.systemPrompt;
           state.turns = session.state.turns;
           state.totalInputTokens = session.state.totalInputTokens;

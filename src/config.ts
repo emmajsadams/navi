@@ -1,10 +1,14 @@
-export type Config = {
-  apiKey: string;
-  model: string;
-  baseUrl: string;
-  maxTokens: number;
-  provider: string;
-};
+import { z } from "zod/v4";
+
+const configSchema = z.object({
+  apiKey: z.string().min(1),
+  model: z.string().min(1),
+  baseUrl: z.url(),
+  maxTokens: z.number().int().positive(),
+  provider: z.string().min(1),
+});
+
+export type Config = z.infer<typeof configSchema>;
 
 const PROVIDER_DEFAULTS: Record<string, { baseUrl: string; envKey: string }> = {
   anthropic: {
@@ -28,11 +32,13 @@ export function loadConfig(providerOverride?: string): Config {
 
   const defaultModel = provider === "openai" ? "gpt-4o" : "claude-sonnet-4-20250514";
 
-  return {
+  const raw = {
     apiKey,
     model: process.env["NAVI_MODEL"] ?? defaultModel,
     baseUrl: process.env[`${provider.toUpperCase()}_BASE_URL`] ?? defaults.baseUrl,
     maxTokens: Number(process.env["NAVI_MAX_TOKENS"] ?? "4096"),
     provider,
   };
+
+  return configSchema.parse(raw);
 }

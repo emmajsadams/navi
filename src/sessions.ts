@@ -8,27 +8,40 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
-  writeFileSync,
   unlinkSync,
+  writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { z } from "zod/v4";
 import type { ConversationState } from "./repl.ts";
 
-export type SessionMetadata = {
-  id: string;
-  model: string;
-  provider: string;
-  turns: number;
-  totalTokens: number;
-  createdAt: string;
-  updatedAt: string;
-};
+const sessionMetadataSchema = z.object({
+  id: z.string().min(1),
+  model: z.string().min(1),
+  provider: z.string().min(1),
+  turns: z.number().int().min(0),
+  totalTokens: z.number().int().min(0),
+  createdAt: z.iso.datetime(),
+  updatedAt: z.iso.datetime(),
+});
 
-export type SessionData = {
-  metadata: SessionMetadata;
-  state: ConversationState;
-};
+export type SessionMetadata = z.infer<typeof sessionMetadataSchema>;
+
+const conversationStateSchema = z.object({
+  messages: z.array(z.unknown()),
+  systemPrompt: z.string().optional(),
+  totalInputTokens: z.number().int().min(0),
+  totalOutputTokens: z.number().int().min(0),
+  turns: z.number().int().min(0),
+});
+
+const sessionDataSchema = z.object({
+  metadata: sessionMetadataSchema,
+  state: conversationStateSchema,
+});
+
+export type SessionData = z.infer<typeof sessionDataSchema>;
 
 const SESSIONS_DIR = join(homedir(), ".navi", "sessions");
 
@@ -61,7 +74,7 @@ export function saveSession(
   const existing = loadSession(id);
   const now = new Date().toISOString();
 
-  const data: SessionData = {
+  const data = {
     metadata: {
       id,
       model,
@@ -74,6 +87,9 @@ export function saveSession(
     state,
   };
 
+  // Validate before writing
+  sessionDataSchema.parse(data);
+
   writeFileSync(sessionPath(id), JSON.stringify(data, null, 2), "utf-8");
 }
 
@@ -83,7 +99,8 @@ export function loadSession(id: string): SessionData | undefined {
 
   try {
     const raw = readFileSync(path, "utf-8");
-    return JSON.parse(raw) as SessionData;
+    const parsed = JSON.parse(raw) as unknown;
+    return sessionDataSchema.parse(parsed) as SessionData;
   } catch {
     return undefined;
   }
@@ -98,7 +115,8 @@ export function listSessions(): SessionMetadata[] {
   for (const file of files) {
     try {
       const raw = readFileSync(join(SESSIONS_DIR, file), "utf-8");
-      const data = JSON.parse(raw) as SessionData;
+      const parsed = JSON.parse(raw) as unknown;
+      const data = sessionDataSchema.parse(parsed) as SessionData;
       sessions.push(data.metadata);
     } catch {
       // skip corrupt files
@@ -114,7 +132,6 @@ export function listSessions(): SessionMetadata[] {
 export function deleteSession(id: string): boolean {
   const path = sessionPath(id);
   if (!existsSync(path)) return false;
-
   unlinkSync(path);
   return true;
 }
