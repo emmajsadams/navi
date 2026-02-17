@@ -1,6 +1,7 @@
 import type { ContentBlock, Message } from "./api.ts";
 import { streamMessage } from "./api.ts";
 import type { Config } from "./config.ts";
+import { type ContextConfig, manageContext } from "./context.ts";
 import type { ToolRegistry } from "./tools.ts";
 
 export type Command =
@@ -40,18 +41,40 @@ export type SendOptions = {
   state: ConversationState;
   userText: string;
   toolRegistry: ToolRegistry | undefined;
+  contextConfig: ContextConfig | undefined;
   onText: (text: string) => void;
   onToolCall: (name: string, input: Record<string, unknown>) => void;
   onToolResult: (name: string, result: string, isError: boolean) => void;
+  onContextTruncation?: (dropped: number) => void;
   confirmTool?: (name: string, input: Record<string, unknown>) => Promise<boolean>;
 };
 
 export async function sendMessage(opts: SendOptions): Promise<void> {
-  const { config, state, userText, toolRegistry, onText, onToolCall, onToolResult, confirmTool } =
-    opts;
+  const {
+    config,
+    state,
+    userText,
+    toolRegistry,
+    contextConfig,
+    onText,
+    onToolCall,
+    onToolResult,
+    onContextTruncation,
+    confirmTool,
+  } = opts;
 
   state.messages.push({ role: "user", content: userText });
-  await runAgentLoop(config, state, toolRegistry, onText, onToolCall, onToolResult, confirmTool);
+  await runAgentLoop(
+    config,
+    state,
+    toolRegistry,
+    contextConfig,
+    onText,
+    onToolCall,
+    onToolResult,
+    onContextTruncation,
+    confirmTool,
+  );
   state.turns++;
 }
 
@@ -61,20 +84,34 @@ async function runAgentLoop(
   config: Config,
   state: ConversationState,
   toolRegistry: ToolRegistry | undefined,
+  contextConfig: ContextConfig | undefined,
   onText: (text: string) => void,
   onToolCall: (name: string, input: Record<string, unknown>) => void,
   onToolResult: (name: string, result: string, isError: boolean) => void,
+  onContextTruncation?: (dropped: number) => void,
   confirmTool?: (name: string, input: Record<string, unknown>) => Promise<boolean>,
 ): Promise<void> {
   const tools = toolRegistry?.apiFormat();
   let maxIterations = 20;
 
   while (maxIterations-- > 0) {
+    // Apply context management before each API call
+    let messagesToSend = state.messages;
+    if (contextConfig) {
+      const result = manageContext(state.messages, contextConfig, state.systemPrompt, tools);
+      if (result.dropped > 0) {
+        onContextTruncation?.(result.dropped);
+        // Update state.messages to the truncated version
+        state.messages = result.messages;
+        messagesToSend = result.messages;
+      }
+    }
+
     const contentBlocks: ContentBlock[] = [];
     const textChunks: string[] = [];
     let stopReason = "end_turn";
 
-    for await (const event of streamMessage(config, state.messages, state.systemPrompt, tools)) {
+    for await (const event of streamMessage(config, messagesToSend, state.systemPrompt, tools)) {
       switch (event.type) {
         case "text":
           textChunks.push(event.text);
@@ -147,12 +184,12 @@ async function runAgentLoop(
       if (confirmTool && DANGEROUS_TOOLS.has(block.name)) {
         const confirmed = await confirmTool(block.name, block.input);
         if (!confirmed) {
-          const msg = "Tool execution denied by user.";
-          onToolResult(block.name, msg, true);
+          const denyMsg = "Tool execution denied by user.";
+          onToolResult(block.name, denyMsg, true);
           toolResults.push({
             type: "tool_result",
             tool_use_id: block.id,
-            content: msg,
+            content: denyMsg,
             is_error: true,
           });
           continue;

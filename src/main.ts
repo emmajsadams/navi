@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { streamMessage } from "./api.ts";
 import { loadConfig } from "./config.ts";
+import { type ContextConfig, getContextLimit } from "./context.ts";
 import { createConversation, parseInput, sendMessage } from "./repl.ts";
 import { builtinTools, createToolRegistry } from "./tools.ts";
 
@@ -11,9 +12,11 @@ function parseArgs(args: string[]): {
   prompt: string | undefined;
   systemPrompt: string | undefined;
   noTools: boolean;
+  contextStrategy: "truncate" | "error";
 } {
   let systemPrompt: string | undefined;
   let noTools = false;
+  let contextStrategy: "truncate" | "error" = "truncate";
   const rest: string[] = [];
 
   for (let i = 0; i < args.length; i++) {
@@ -29,6 +32,11 @@ function parseArgs(args: string[]): {
       }
     } else if (arg === "--no-tools") {
       noTools = true;
+    } else if (arg === "--context-strategy" && i + 1 < args.length) {
+      const val = args[++i];
+      if (val === "truncate" || val === "error") {
+        contextStrategy = val;
+      }
     } else if (arg) {
       rest.push(arg);
     }
@@ -38,6 +46,7 @@ function parseArgs(args: string[]): {
     prompt: rest.length > 0 ? rest.join(" ") : undefined,
     systemPrompt,
     noTools,
+    contextStrategy,
   };
 }
 
@@ -83,15 +92,26 @@ async function runSingleShot(prompt: string, systemPrompt: string | undefined) {
   }
 }
 
-async function runRepl(systemPrompt: string | undefined, useTools: boolean) {
+async function runRepl(
+  systemPrompt: string | undefined,
+  useTools: boolean,
+  contextStrategy: "truncate" | "error",
+) {
   const config = loadConfig();
   const state = createConversation(systemPrompt);
   const toolRegistry = useTools ? createToolRegistry(builtinTools) : undefined;
 
+  const contextConfig: ContextConfig = {
+    maxContextTokens: getContextLimit(config.model),
+    strategy: contextStrategy,
+    reservedTokens: config.maxTokens, // reserve space for the response
+  };
+
   const toolNames = toolRegistry ? toolRegistry.tools.map((t) => t.name).join(", ") : "none";
 
-  console.log("navi v0.3.0");
+  console.log("navi v0.4.0");
   console.log(`Tools: ${toolNames}`);
+  console.log(`Context: ${contextConfig.maxContextTokens} tokens (${contextStrategy})`);
   console.log("Type /quit to exit, /clear to reset, /usage for stats.\n");
 
   const promptStr = "\x1b[36mnavi>\x1b[0m ";
@@ -127,6 +147,7 @@ async function runRepl(systemPrompt: string | undefined, useTools: boolean) {
             state,
             userText: command.text,
             toolRegistry,
+            contextConfig,
             onText: (text) => process.stdout.write(text),
             onToolCall: (name, input) => {
               console.log(`\n\x1b[33m⚡ ${name}\x1b[0m ${JSON.stringify(input)}`);
@@ -136,6 +157,11 @@ async function runRepl(systemPrompt: string | undefined, useTools: boolean) {
               const icon = isError ? "✗" : "✓";
               const preview = result.length > 200 ? `${result.slice(0, 200)}...` : result;
               console.log(`${color}${icon} ${name}\x1b[0m: ${preview}\n`);
+            },
+            onContextTruncation: (dropped) => {
+              console.log(
+                `\x1b[33m⚠ Context truncated: dropped ${dropped} oldest message(s)\x1b[0m\n`,
+              );
             },
             confirmTool: async (name, input) => {
               return confirm(`\x1b[33mAllow ${name}?\x1b[0m ${JSON.stringify(input)} [y/N] `);
@@ -153,7 +179,7 @@ async function runRepl(systemPrompt: string | undefined, useTools: boolean) {
 }
 
 async function main() {
-  const { prompt, systemPrompt, noTools } = parseArgs(process.argv.slice(2));
+  const { prompt, systemPrompt, noTools, contextStrategy } = parseArgs(process.argv.slice(2));
 
   if (prompt) {
     await runSingleShot(prompt, systemPrompt);
@@ -168,7 +194,7 @@ async function main() {
     }
   }
 
-  await runRepl(systemPrompt, !noTools);
+  await runRepl(systemPrompt, !noTools, contextStrategy);
 }
 
 main();
