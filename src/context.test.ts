@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import type { Message } from "./api.ts";
+import type { ProviderMessage } from "./providers/types.ts";
 import {
   estimateTokens,
   estimateSystemTokens,
@@ -10,7 +10,7 @@ import {
   type ContextConfig,
 } from "./context.ts";
 
-function msg(role: "user" | "assistant", content: string): Message {
+function msg(role: "user" | "assistant", content: string): ProviderMessage {
   return { role, content };
 }
 
@@ -27,7 +27,7 @@ describe("estimateTokens", () => {
   });
 
   it("estimates content block arrays", () => {
-    const message: Message = {
+    const message: ProviderMessage = {
       role: "assistant",
       content: [{ type: "text", text: "a".repeat(100) }],
     };
@@ -35,7 +35,7 @@ describe("estimateTokens", () => {
   });
 
   it("estimates tool_use blocks", () => {
-    const message: Message = {
+    const message: ProviderMessage = {
       role: "assistant",
       content: [
         {
@@ -51,7 +51,7 @@ describe("estimateTokens", () => {
   });
 
   it("estimates tool_result blocks", () => {
-    const message: Message = {
+    const message: ProviderMessage = {
       role: "user",
       content: [
         {

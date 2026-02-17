@@ -2,9 +2,9 @@
 
 import { readFileSync } from "node:fs";
 import { createInterface } from "node:readline";
-import { streamMessage } from "./api.ts";
 import { loadConfig } from "./config.ts";
 import { type ContextConfig, getContextLimit } from "./context.ts";
+import { getProvider } from "./providers/registry.ts";
 import { createConversation, parseInput, sendMessage } from "./repl.ts";
 import { builtinTools, createToolRegistry } from "./tools.ts";
 import { color, styled } from "./tui/ansi.ts";
@@ -17,10 +17,12 @@ function parseArgs(args: string[]): {
   noTools: boolean;
   contextStrategy: "truncate" | "error";
   noTui: boolean;
+  provider: string | undefined;
 } {
   let systemPrompt: string | undefined;
   let noTools = false;
   let noTui = false;
+  let provider: string | undefined;
   let contextStrategy: "truncate" | "error" = "truncate";
   const rest: string[] = [];
 
@@ -39,6 +41,8 @@ function parseArgs(args: string[]): {
       noTools = true;
     } else if (arg === "--no-tui") {
       noTui = true;
+    } else if (arg === "--provider" && i + 1 < args.length) {
+      provider = args[++i];
     } else if (arg === "--context-strategy" && i + 1 < args.length) {
       const val = args[++i];
       if (val === "truncate" || val === "error") {
@@ -54,6 +58,7 @@ function parseArgs(args: string[]): {
     systemPrompt,
     noTools,
     noTui,
+    provider,
     contextStrategy,
   };
 }
@@ -79,12 +84,18 @@ async function confirm(question: string): Promise<boolean> {
   });
 }
 
-async function runSingleShot(prompt: string, systemPrompt: string | undefined, useTui: boolean) {
-  const config = loadConfig();
+async function runSingleShot(
+  prompt: string,
+  systemPrompt: string | undefined,
+  useTui: boolean,
+  providerName: string | undefined,
+) {
+  const config = loadConfig(providerName);
+  const provider = getProvider(config.provider);
   const messages = [{ role: "user" as const, content: prompt }];
   const chunks: string[] = [];
 
-  for await (const event of streamMessage(config, messages, systemPrompt)) {
+  for await (const event of provider.send(config, messages, systemPrompt)) {
     switch (event.type) {
       case "text":
         chunks.push(event.text);
@@ -118,8 +129,10 @@ async function runRepl(
   useTools: boolean,
   contextStrategy: "truncate" | "error",
   useTui: boolean,
+  providerName: string | undefined,
 ) {
-  const config = loadConfig();
+  const config = loadConfig(providerName);
+  const provider = getProvider(config.provider);
   const state = createConversation(systemPrompt);
   const toolRegistry = useTools ? createToolRegistry(builtinTools) : undefined;
 
@@ -132,8 +145,8 @@ async function runRepl(
   const toolNames = toolRegistry ? toolRegistry.tools.map((t) => t.name).join(", ") : "none";
 
   // Header
-  console.log(styled("navi", color.bold, color.cyan) + styled(" v0.5.0", color.dim));
-  console.log(styled(`model: ${config.model}`, color.dim));
+  console.log(styled("navi", color.bold, color.cyan) + styled(" v0.6.0", color.dim));
+  console.log(styled(`provider: ${provider.name} · model: ${config.model}`, color.dim));
   console.log(styled(`tools: ${toolNames}`, color.dim));
   console.log(
     styled(
@@ -181,6 +194,7 @@ async function runRepl(
         try {
           await sendMessage({
             config,
+            provider,
             state,
             userText: command.text,
             toolRegistry,
@@ -230,7 +244,6 @@ async function runRepl(
               return result;
             },
           });
-
           console.log("\n");
         } catch (err) {
           spinner?.stop("");
@@ -247,26 +260,26 @@ async function runRepl(
 }
 
 async function main() {
-  const { prompt, systemPrompt, noTools, noTui, contextStrategy } = parseArgs(
+  const { prompt, systemPrompt, noTools, noTui, provider, contextStrategy } = parseArgs(
     process.argv.slice(2),
   );
 
   const useTui = !noTui && process.stdout.isTTY === true;
 
   if (prompt) {
-    await runSingleShot(prompt, systemPrompt, useTui);
+    await runSingleShot(prompt, systemPrompt, useTui, provider);
     return;
   }
 
   if (!process.stdin.isTTY) {
     const stdinText = await readStdin();
     if (stdinText) {
-      await runSingleShot(stdinText, systemPrompt, useTui);
+      await runSingleShot(stdinText, systemPrompt, useTui, provider);
       return;
     }
   }
 
-  await runRepl(systemPrompt, !noTools, contextStrategy, useTui);
+  await runRepl(systemPrompt, !noTools, contextStrategy, useTui, provider);
 }
 
 main();

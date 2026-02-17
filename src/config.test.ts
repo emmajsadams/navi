@@ -9,6 +9,8 @@ describe("loadConfig", () => {
     delete process.env["NAVI_MODEL"];
     delete process.env["ANTHROPIC_BASE_URL"];
     delete process.env["NAVI_MAX_TOKENS"];
+    delete process.env["NAVI_PROVIDER"];
+    delete process.env["OPENAI_API_KEY"];
   });
 
   afterEach(() => {
@@ -21,6 +23,7 @@ describe("loadConfig", () => {
     expect(config.model).toBe("claude-sonnet-4-20250514");
     expect(config.baseUrl).toBe("https://api.anthropic.com");
     expect(config.maxTokens).toBe(4096);
+    expect(config.provider).toBe("anthropic");
   });
 
   it("respects env overrides", () => {
@@ -37,5 +40,19 @@ describe("loadConfig", () => {
   it("throws without API key", () => {
     delete process.env["ANTHROPIC_API_KEY"];
     expect(() => loadConfig()).toThrow("ANTHROPIC_API_KEY is required");
+  });
+
+  it("supports openai provider", () => {
+    process.env["OPENAI_API_KEY"] = "sk-test";
+    const config = loadConfig("openai");
+    expect(config.provider).toBe("openai");
+    expect(config.apiKey).toBe("sk-test");
+    expect(config.model).toBe("gpt-4o");
+    expect(config.baseUrl).toBe("https://api.openai.com");
+  });
+
+  it("accepts provider override", () => {
+    const config = loadConfig("anthropic");
+    expect(config.provider).toBe("anthropic");
   });
 });

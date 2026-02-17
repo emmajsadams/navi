@@ -1,5 +1,4 @@
-import type { ContentBlock, Message } from "./api.ts";
-import type { ApiTool } from "./tools.ts";
+import type { ProviderContentBlock, ProviderMessage, ProviderTool } from "./providers/types.ts";
 
 export type ContextStrategy = "truncate" | "error";
 
@@ -26,7 +25,7 @@ export function getContextLimit(model: string): number {
  * Uses a rough heuristic: ~4 chars per token for English text.
  * Not perfect, but good enough for budget tracking without a tokenizer dependency.
  */
-export function estimateTokens(message: Message): number {
+export function estimateTokens(message: ProviderMessage): number {
   if (typeof message.content === "string") {
     return Math.ceil(message.content.length / 4);
   }
@@ -38,7 +37,7 @@ export function estimateTokens(message: Message): number {
   return total;
 }
 
-function estimateBlockTokens(block: ContentBlock): number {
+function estimateBlockTokens(block: ProviderContentBlock): number {
   switch (block.type) {
     case "text":
       return Math.ceil(block.text.length / 4);
@@ -55,7 +54,7 @@ function estimateBlockTokens(block: ContentBlock): number {
 
 export function estimateSystemTokens(
   systemPrompt: string | undefined,
-  tools: ApiTool[] | undefined,
+  tools: ProviderTool[] | undefined,
 ): number {
   let total = 0;
   if (systemPrompt) {
@@ -67,7 +66,7 @@ export function estimateSystemTokens(
   return total;
 }
 
-export function totalMessageTokens(messages: Message[]): number {
+export function totalMessageTokens(messages: ProviderMessage[]): number {
   let total = 0;
   for (const msg of messages) {
     total += estimateTokens(msg);
@@ -76,7 +75,7 @@ export function totalMessageTokens(messages: Message[]): number {
 }
 
 export type TruncationResult = {
-  messages: Message[];
+  messages: ProviderMessage[];
   dropped: number;
 };
 
@@ -85,7 +84,7 @@ export type TruncationResult = {
  * Keeps the first message (usually the initial user prompt) and drops
  * the oldest messages in between until the total fits.
  */
-export function truncateMessages(messages: Message[], maxTokens: number): TruncationResult {
+export function truncateMessages(messages: ProviderMessage[], maxTokens: number): TruncationResult {
   if (messages.length === 0) {
     return { messages: [], dropped: 0 };
   }
@@ -106,7 +105,7 @@ export function truncateMessages(messages: Message[], maxTokens: number): Trunca
 
   // Build from the end, adding messages until we run out of budget
   let budget = maxTokens - firstTokens;
-  const kept: Message[] = [];
+  const kept: ProviderMessage[] = [];
 
   for (let i = messages.length - 1; i >= 1; i--) {
     const msg = messages[i]!;
@@ -130,10 +129,10 @@ export function truncateMessages(messages: Message[], maxTokens: number): Trunca
  * Apply context management strategy to messages before sending.
  */
 export function manageContext(
-  messages: Message[],
+  messages: ProviderMessage[],
   config: ContextConfig,
   systemPrompt: string | undefined,
-  tools: ApiTool[] | undefined,
+  tools: ProviderTool[] | undefined,
 ): TruncationResult {
   const reservedTokens = estimateSystemTokens(systemPrompt, tools);
   const availableTokens = config.maxContextTokens - reservedTokens - config.reservedTokens;

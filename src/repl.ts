@@ -1,7 +1,6 @@
-import type { ContentBlock, Message } from "./api.ts";
-import { streamMessage } from "./api.ts";
 import type { Config } from "./config.ts";
 import { type ContextConfig, manageContext } from "./context.ts";
+import type { Provider, ProviderContentBlock, ProviderMessage } from "./providers/types.ts";
 import type { ToolRegistry } from "./tools.ts";
 
 export type Command =
@@ -19,7 +18,7 @@ export function parseInput(input: string): Command {
 }
 
 export type ConversationState = {
-  messages: Message[];
+  messages: ProviderMessage[];
   systemPrompt: string | undefined;
   totalInputTokens: number;
   totalOutputTokens: number;
@@ -38,6 +37,7 @@ export function createConversation(systemPrompt: string | undefined): Conversati
 
 export type SendOptions = {
   config: Config;
+  provider: Provider;
   state: ConversationState;
   userText: string;
   toolRegistry: ToolRegistry | undefined;
@@ -52,6 +52,7 @@ export type SendOptions = {
 export async function sendMessage(opts: SendOptions): Promise<void> {
   const {
     config,
+    provider,
     state,
     userText,
     toolRegistry,
@@ -66,6 +67,7 @@ export async function sendMessage(opts: SendOptions): Promise<void> {
   state.messages.push({ role: "user", content: userText });
   await runAgentLoop(
     config,
+    provider,
     state,
     toolRegistry,
     contextConfig,
@@ -82,6 +84,7 @@ const DANGEROUS_TOOLS = new Set(["exec", "write_file"]);
 
 async function runAgentLoop(
   config: Config,
+  provider: Provider,
   state: ConversationState,
   toolRegistry: ToolRegistry | undefined,
   contextConfig: ContextConfig | undefined,
@@ -101,17 +104,16 @@ async function runAgentLoop(
       const result = manageContext(state.messages, contextConfig, state.systemPrompt, tools);
       if (result.dropped > 0) {
         onContextTruncation?.(result.dropped);
-        // Update state.messages to the truncated version
         state.messages = result.messages;
         messagesToSend = result.messages;
       }
     }
 
-    const contentBlocks: ContentBlock[] = [];
+    const contentBlocks: ProviderContentBlock[] = [];
     const textChunks: string[] = [];
     let stopReason = "end_turn";
 
-    for await (const event of streamMessage(config, messagesToSend, state.systemPrompt, tools)) {
+    for await (const event of provider.send(config, messagesToSend, state.systemPrompt, tools)) {
       switch (event.type) {
         case "text":
           textChunks.push(event.text);
@@ -138,7 +140,7 @@ async function runAgentLoop(
     }
 
     // Build assistant message
-    const assistantContent: ContentBlock[] = [];
+    const assistantContent: ProviderContentBlock[] = [];
     if (textChunks.length > 0) {
       assistantContent.push({
         type: "text",
@@ -160,7 +162,7 @@ async function runAgentLoop(
     }
 
     // Execute tools
-    const toolResults: ContentBlock[] = [];
+    const toolResults: ProviderContentBlock[] = [];
 
     for (const block of contentBlocks) {
       if (block.type !== "tool_use") continue;

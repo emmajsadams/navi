@@ -1,29 +1,15 @@
-import type { Config } from "./config.ts";
-import type { ApiTool } from "./tools.ts";
+/**
+ * Anthropic Messages API provider.
+ * Streams responses via SSE.
+ */
 
-export type MessageContent = string | ContentBlock[];
-
-export type ContentBlock =
-  | { type: "text"; text: string }
-  | { type: "tool_use"; id: string; name: string; input: Record<string, unknown> }
-  | { type: "tool_result"; tool_use_id: string; content: string; is_error?: boolean };
-
-export type Message = {
-  role: "user" | "assistant";
-  content: MessageContent;
-};
-
-export type Usage = {
-  inputTokens: number;
-  outputTokens: number;
-};
-
-export type StreamEvent =
-  | { type: "text"; text: string }
-  | { type: "tool_use"; id: string; name: string; input: Record<string, unknown> }
-  | { type: "usage"; usage: Usage }
-  | { type: "error"; error: string }
-  | { type: "stop"; stopReason: string };
+import type {
+  Provider,
+  ProviderConfig,
+  ProviderMessage,
+  ProviderStreamEvent,
+  ProviderTool,
+} from "./types.ts";
 
 type ApiStreamEvent = {
   type: string;
@@ -40,12 +26,12 @@ type ApiStreamEvent = {
   error?: { message?: string };
 };
 
-export async function* streamMessage(
-  config: Config,
-  messages: Message[],
+async function* send(
+  config: ProviderConfig,
+  messages: ProviderMessage[],
   systemPrompt?: string,
-  tools?: ApiTool[],
-): AsyncGenerator<StreamEvent> {
+  tools?: ProviderTool[],
+): AsyncGenerator<ProviderStreamEvent> {
   const body: Record<string, unknown> = {
     model: config.model,
     max_tokens: config.maxTokens,
@@ -71,10 +57,7 @@ export async function* streamMessage(
 
   if (!response.ok) {
     const text = await response.text();
-    yield {
-      type: "error",
-      error: `API error ${response.status}: ${text}`,
-    };
+    yield { type: "error", error: `API error ${response.status}: ${text}` };
     return;
   }
 
@@ -88,8 +71,6 @@ export async function* streamMessage(
   let buffer = "";
   let inputTokens = 0;
   let outputTokens = 0;
-
-  // Track tool_use blocks being built
   const toolBlocks = new Map<number, { id: string; name: string; jsonChunks: string[] }>();
 
   while (true) {
@@ -120,7 +101,6 @@ export async function* streamMessage(
         yield { type: "text", text: event.delta.text };
       }
 
-      // Tool use: start tracking
       if (
         event.type === "content_block_start" &&
         event.content_block?.type === "tool_use" &&
@@ -133,7 +113,6 @@ export async function* streamMessage(
         });
       }
 
-      // Tool use: accumulate JSON
       if (
         event.type === "content_block_delta" &&
         event.delta?.type === "input_json_delta" &&
@@ -145,7 +124,6 @@ export async function* streamMessage(
         }
       }
 
-      // Tool use: complete
       if (event.type === "content_block_stop" && event.index !== undefined) {
         const block = toolBlocks.get(event.index);
         if (block) {
@@ -155,7 +133,7 @@ export async function* streamMessage(
             try {
               input = JSON.parse(json) as Record<string, unknown>;
             } catch {
-              // malformed JSON from API
+              // malformed JSON
             }
           }
           yield {
@@ -177,7 +155,10 @@ export async function* streamMessage(
           outputTokens = event.usage.output_tokens ?? 0;
         }
         if (event.delta?.stop_reason) {
-          yield { type: "stop", stopReason: event.delta.stop_reason };
+          yield {
+            type: "stop",
+            stopReason: event.delta.stop_reason,
+          };
         }
       }
 
@@ -193,3 +174,8 @@ export async function* streamMessage(
 
   yield { type: "usage", usage: { inputTokens, outputTokens } };
 }
+
+export const anthropicProvider: Provider = {
+  name: "anthropic",
+  send,
+};
