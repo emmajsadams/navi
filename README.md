@@ -11,6 +11,7 @@ A learning project — building an AI agent loop from scratch to understand the 
 - **Linting:** [oxlint](https://oxc.rs)
 - **Formatting:** [oxfmt](https://oxc.rs)
 - **Version pinning:** [proto](https://moonrepo.dev/proto)
+- **Hooks:** [husky](https://typicode.github.io/husky/) (pre-commit: lint + fmt + test + tsc)
 
 ## Getting Started
 
@@ -21,8 +22,18 @@ bun install
 # copy env and add your API key(s)
 cp .env.example .env
 
-# run
+# run (interactive REPL)
 bun start
+
+# single-shot
+bun start "explain monads"
+echo "explain monads" | bun start
+
+# with system prompt (string or file path)
+bun start --system "You are a pirate."
+
+# disable tools
+bun start --no-tools
 
 # dev mode (watch)
 bun dev
@@ -39,47 +50,67 @@ bun dev
 | `bun run fmt` | Format with oxfmt |
 | `bun run check` | Lint + format check + test |
 
+## Architecture
+
+```
+src/
+  main.ts          # entrypoint, arg parsing, REPL runner
+  api.ts           # Anthropic Messages API client (raw fetch, SSE streaming)
+  config.ts        # env-based configuration
+  repl.ts          # conversation state, agent loop, tool execution
+  tools.ts         # tool registry + built-in tools
+```
+
+### Built-in Tools
+
+| Tool | Description |
+|------|-------------|
+| `read_file` | Read file contents |
+| `write_file` | Write content to a file (confirmation required) |
+| `list_dir` | List directory contents |
+| `exec` | Execute shell commands (confirmation required) |
+
+### Development Workflow (CLAUDE.md)
+
+1. **IMPLEMENT** — make changes in `src/`
+2. **VERIFY** — `bun run check` + `npx tsc --noEmit`
+3. **REVIEW** — spawn subagent with `skills/REVIEW.md` to review diff, fix issues, report
+
 ## Roadmap
 
 Each milestone builds on the last. Designed for learning — every phase teaches a distinct concept and leaves you with something that runs.
 
-### v0.1 — Single-shot LLM call
+### v0.1 — Single-shot LLM call ✅
 **Learn:** API shape, message format, streaming, env config
 
-- [ ] Load config from env (API key, model name, base URL)
-- [ ] Send a single user prompt to Anthropic Messages API (raw `fetch`, no SDK)
-- [ ] Stream the response token-by-token to stdout
-- [ ] Handle errors gracefully (bad key, rate limit, network)
-- [ ] Print token usage after response completes
-- [ ] Tests: mock fetch, verify message construction and stream parsing
+- [x] Load config from env (API key, model name, base URL)
+- [x] Send a single user prompt to Anthropic Messages API (raw `fetch`, no SDK)
+- [x] Stream the response token-by-token to stdout
+- [x] Handle errors gracefully (bad key, rate limit, network)
+- [x] Print token usage after response completes
+- [x] Tests: mock fetch, verify message construction and stream parsing
 
-**Result:** `echo "explain monads" | bun start` streams an answer.
-
-### v0.2 — Conversation loop
+### v0.2 — Conversation loop ✅
 **Learn:** Message array management, turn-taking, input handling
 
-- [ ] Interactive REPL: read user input, send, print response, repeat
-- [ ] Maintain conversation history (system + user/assistant message array)
-- [ ] System prompt loaded from file or flag (`--system`)
-- [ ] `/quit` and `/clear` commands
-- [ ] Token counting per turn and running total
-- [ ] Tests: conversation state management, command parsing
+- [x] Interactive REPL: read user input, send, print response, repeat
+- [x] Maintain conversation history (system + user/assistant message array)
+- [x] System prompt loaded from file or flag (`--system`)
+- [x] `/quit`, `/clear`, `/usage` commands
+- [x] Token counting per turn and running total
+- [x] Tests: conversation state management, command parsing
 
-**Result:** A working chat REPL in the terminal. No tools yet, just conversation.
-
-### v0.3 — Tool system
+### v0.3 — Tool system ✅
 **Learn:** Tool schemas, function calling protocol, execution sandbox
 
-- [ ] Tool registry: define tools as `{ name, description, schema, execute }` objects
-- [ ] Wire tools into API request (Anthropic tool_use format)
-- [ ] Parse tool_use blocks from responses, execute, return tool_result
-- [ ] Agent loop: repeat until model stops calling tools
-- [ ] Built-in tools: `read_file`, `write_file`, `list_dir`, `exec`
-- [ ] Tool call display in output (name, input, result)
-- [ ] Safety: confirmation prompt before exec/write, allowlist mode
-- [ ] Tests: tool registry, execution loop, mock tool calls
-
-**Result:** An agent that can read/write files and run commands when asked.
+- [x] Tool registry: define tools as `{ name, description, schema, execute }` objects
+- [x] Wire tools into API request (Anthropic tool_use format)
+- [x] Parse tool_use blocks from responses, execute, return tool_result
+- [x] Agent loop: repeat until model stops calling tools
+- [x] Built-in tools: `read_file`, `write_file`, `list_dir`, `exec`
+- [x] Tool call display in output (name, input, result)
+- [x] Safety: confirmation prompt before exec/write
+- [x] Tests: tool registry, execution, mock tool calls
 
 ### v0.4 — Context window management
 **Learn:** Token budgets, truncation strategies, summarization
@@ -90,8 +121,6 @@ Each milestone builds on the last. Designed for learning — every phase teaches
 - [ ] Configurable strategy (truncate vs summarize vs fail)
 - [ ] Reserve budget for system prompt + tools (they always fit)
 - [ ] Tests: budget tracking, truncation logic, summary generation
-
-**Result:** Long conversations that don't crash when they hit the context limit.
 
 ### v0.5 — TUI
 **Learn:** Terminal rendering, layout, real-time updates
@@ -105,8 +134,6 @@ Each milestone builds on the last. Designed for learning — every phase teaches
 - [ ] Color theme
 - [ ] Tests: rendering logic (unit test the formatters, not the terminal)
 
-**Result:** Looks like a real CLI agent, not a print-loop.
-
 ### v0.6 — Multi-provider
 **Learn:** API abstraction, adapter pattern, different message formats
 
@@ -116,8 +143,6 @@ Each milestone builds on the last. Designed for learning — every phase teaches
 - [ ] Provider selection via config/flag (`--provider openai`)
 - [ ] Normalize streaming events across providers
 - [ ] Tests: provider adapters with recorded API responses
-
-**Result:** Same harness, multiple models. Switch with a flag.
 
 ### v0.7 — Session persistence
 **Learn:** Serialization, storage, resume logic
@@ -129,8 +154,6 @@ Each milestone builds on the last. Designed for learning — every phase teaches
 - [ ] `/save`, `/load`, `/sessions` commands
 - [ ] Tests: serialization roundtrip, session listing
 
-**Result:** Close navi, come back later, pick up where you left off.
-
 ### Future ideas (unplanned)
 - MCP (Model Context Protocol) tool server support
 - Agent-to-agent delegation (spawn sub-agents)
@@ -139,15 +162,6 @@ Each milestone builds on the last. Designed for learning — every phase teaches
 - Config file (TOML) instead of just env/flags
 - Prompt library / template system
 - Evaluation harness (run prompts, score outputs)
-
-## Architecture
-
-```
-src/
-  main.ts          # entrypoint
-```
-
-_Architecture section will grow with each milestone._
 
 ## License
 
